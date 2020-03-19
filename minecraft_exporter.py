@@ -11,12 +11,16 @@ from os.path import isfile, join
 
 class MinecraftCollector(object):
     def __init__(self):
-        self.statsdirectory = "/world/stats"
-        self.playerdirectory = "/world/playerdata"
-        self.advancementsdirectory = "/world/advancements"
-        self.betterquesting = "/world/betterquesting"
+        prefix="/home/jiba/Minecraft/server"
+        self.statsdirectory = prefix+"/world/stats"
+        self.playerdirectory = prefix+"/world/playerdata"
+        self.advancementsdirectory = prefix+"/world/advancements"
+        self.betterquesting = prefix+"/world/betterquesting"
         self.map = dict()
         self.questsEnabled = False
+        if all(x in os.environ for x in ['RCON_HOST','RCON_PASSWORD']):
+            self.mcr = MCRcon(os.environ['RCON_HOST'],os.environ['RCON_PASSWORD'],port=int(os.environ['RCON_PORT']))
+            self.mcr.connect()
         if os.path.isdir(self.betterquesting):
             self.questsEnabled = True
 
@@ -41,11 +45,23 @@ class MinecraftCollector(object):
         overall_ticktime = Metric('overall_ticktime',"overall Ticktime","counter")
         player_online    = Metric('player_online',"is 1 if player is online","counter")
         entities         = Metric('entities',"type and count of active entites", "counter")
-        mcr = MCRcon(os.environ['RCON_HOST'],os.environ['RCON_PASSWORD'],port=int(os.environ['RCON_PORT']))
-        mcr.connect()
+        #moded by AceDroidX
+        tps_from_last1    = Metric('tps_from_last1',"tps_from_last 1 min(tps)", "gauge")
+        tps_from_last5    = Metric('tps_from_last5',"tps_from_last 5 min(tps)", "gauge")
+        tps_from_last15    = Metric('tps_from_last15',"tps_from_last 15 min(tps)", "gauge")
+
+        resp = self.mcr.command("tps")
+        print('debug:tps'+resp)
+        dimtpsregex = re.compile("([0-9]*\..*), §.*?([0-9]*\..*), §.*?([0-9]*\..*)")
+        print('debug:tpsfindall:'+str(dimtpsregex.findall(resp)))
+        tps_from_last1.add_sample('tps_from_last1',value=dimtpsregex.findall(resp)[0][0],labels={})
+        tps_from_last5.add_sample('tps_from_last5',value=dimtpsregex.findall(resp)[0][1],labels={})
+        tps_from_last15.add_sample('tps_from_last15',value=dimtpsregex.findall(resp)[0][2],labels={})
 
         # dimensions
+        """
         resp = mcr.command("forge tps")
+        print('debug1'+resp)
         dimtpsregex = re.compile("Dim\s*(-*\d*)\s\((.*?)\)\s:\sMean tick time:\s(.*?) ms\. Mean TPS: (\d*\.\d*)")
         for dimid, dimname, meanticktime, meantps in dimtpsregex.findall(resp):
             dim_tps.add_sample('dim_tps',value=meantps,labels={'dimension_id':dimid,'dimension_name':dimname})
@@ -53,22 +69,26 @@ class MinecraftCollector(object):
         overallregex = re.compile("Overall\s?: Mean tick time: (.*) ms. Mean TPS: (.*)")
         overall_tps.add_sample('overall_tps',value=overallregex.findall(resp)[0][1],labels={})
         overall_ticktime.add_sample('overall_ticktime',value=overallregex.findall(resp)[0][0],labels={})
+        """
 
         # entites
+        """
         resp = mcr.command("forge entity list")
         entityregex = re.compile("(\d+): (.*?:.*?)\s")
         for entitycount, entityname in entityregex.findall(resp):
             entities.add_sample('entities',value=entitycount,labels={'entity':entityname})
+        """
 
         # player
-        resp = mcr.command("list")
+        resp = self.mcr.command("list")
         playerregex = re.compile("There are \d*\/20 players online:(.*)")
         if playerregex.findall(resp):
             for player in playerregex.findall(resp)[0].split(","):
                 if player:
                     player_online.add_sample('player_online',value=1,labels={'player':player.lstrip()})
 
-        return[dim_tps,dim_ticktime,overall_tps,overall_ticktime,player_online,entities]
+        #return[dim_tps,dim_ticktime,overall_tps,overall_ticktime,player_online,entities]
+        return[player_online,tps_from_last1,tps_from_last5,tps_from_last15]
 
     def get_player_quests_finished(self,uuid):
         with open(self.betterquesting+"/QuestProgress.json") as json_file:
@@ -190,9 +210,11 @@ class MinecraftCollector(object):
         return [blocks_mined,blocks_picked_up,player_deaths,player_jumps,cm_traveled,player_xp_total,player_current_level,player_food_level,player_health,player_score,entities_killed,damage_taken,damage_dealt,blocks_crafted,player_playtime,player_advancements,player_slept,player_used_crafting_table,player_quests_finished]
 
     def collect(self):
-        for player in self.get_players():
-            for metric in self.update_metrics_for_player(player)+self.get_server_stats():
-                yield metric
+#        for player in self.get_players():
+#            for metric in self.update_metrics_for_player(player)+self.get_server_stats():
+#                yield metric
+         for metric in self.get_server_stats():
+             yield metric
 
 
 if __name__ == '__main__':
